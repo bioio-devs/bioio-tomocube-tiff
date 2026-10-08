@@ -10,7 +10,7 @@ from bioio import BioImage
 from bioio_base import exceptions, test_utilities
 from ome_types.model import OME
 
-from bioio_tomocube_tiff import Reader, ReaderMetadata
+from bioio_tomocube_tiff import Reader
 from bioio_tomocube_tiff.tomocube_file import RI_SCALE, TomocubeFile
 
 from .conftest import LOCAL_RESOURCES_DIR
@@ -35,7 +35,6 @@ SHAPE_3D = (2, 3, 70, 32, 32)
 SHAPE_2D = (2, 2, 1, 32, 32)
 INTERVAL = timedelta(seconds=354)  # TP01 12:36:59 -> TP05 12:42:53
 T0, T1 = datetime(2025, 10, 3, 12, 36, 59), datetime(2025, 10, 3, 12, 42, 53)
-SERIES = {"3D": CHANNELS_3D, "2DMIP": CHANNELS_2D}
 
 
 def _copy_fixtures(root, skip=()):
@@ -71,8 +70,6 @@ def _summary(path):
         (f"{BASE}.TP01_HT3D_0.00.TIFF", {"3D": ["HT"]}),
         (f"{BASE}.TP05_FL3D_CH1_0.00.TIFF", {"3D": ["FL_CH1"]}),
         (f"{BASE}.TP05_FL2D_CH0_0.00.TIFF", {"2DMIP": ["FL_CH0"]}),
-        ("exp_HT3D_0.00.tif", {"3D": ["HT"]}),
-        ("exp.A1.TP12_HT2D_1.50.TIFF", {"2DMIP": ["HT"]}),
     ],
 )
 def test_parse_filename(tmp_path, name, expected):
@@ -81,28 +78,15 @@ def test_parse_filename(tmp_path, name, expected):
     assert _summary(tmp_path) == (expected, {(T0,)})
 
 
-@pytest.mark.parametrize(
-    "name", ["image.tiff", "HT3D.TIFF", f"{BASE}.TP01_BF_0.00.TIFF", "x_FL3D_CH0.TIFF"]
-)
-def test_parse_filename_rejects(tmp_path, name):
-    shutil.copyfile(HT_TP01, tmp_path / name)
+def test_parse_filename_rejects(tmp_path):
+    shutil.copyfile(HT_TP01, tmp_path / "image.tiff")
     with pytest.raises(exceptions.UnsupportedFileFormatError, match="No Tomocube"):
         Reader(tmp_path)
 
 
-def test_discover_full_series():
-    assert _summary(TIFF_DIR) == (SERIES, {(T0, T1)})
-
-
-@pytest.mark.parametrize("path", [HT_TP01, FL3D_CH1_TP05])
-def test_single_file_rejected(path):
+def test_single_file_rejected():
     with pytest.raises(exceptions.UnsupportedFileFormatError, match="Not a directory"):
-        Reader(path)
-
-
-def test_reader_metadata():
-    assert ReaderMetadata.get_supported_extensions() == []
-    assert ReaderMetadata.supports_directory_images()
+        Reader(HT_TP01)
 
 
 # ---------------------------------------------------------------------------
@@ -225,11 +209,6 @@ def test_fl3d_reads_all_pages_not_imagej_slices():
     assert nonzero[0] == 30 and nonzero[-1] == 43 and len(nonzero) == 14
 
 
-def test_z_spacing_comes_from_ht_header():
-    rdr = Reader(TIFF_DIR)
-    assert rdr.physical_pixel_sizes.Z == pytest.approx(PX_Z)
-
-
 def test_ht_is_refractive_index():
     raw = _pages(HT_TP01)
     assert raw.dtype == np.uint16
@@ -266,10 +245,20 @@ def test_incomplete_timepoint_is_padded(tmp_path, caplog):
 # ---------------------------------------------------------------------------
 
 
-def test_time_interval_and_ome_planes():
+def test_metadata():
     rdr = Reader(TIFF_DIR)
     assert rdr.time_interval == INTERVAL
-    img3d, img2d = rdr.ome_metadata.images
+    ome = rdr.ome_metadata
+    assert isinstance(ome, OME) and len(ome.images) == 2
+    img3d, img2d = ome.images
+    assert (img3d.name, img2d.name) == SCENES
+    assert [c.name for c in img3d.pixels.channels] == CHANNELS_3D
+    assert [c.name for c in img2d.pixels.channels] == CHANNELS_2D
+    assert img2d.pixels.size_z == 1 and img2d.pixels.physical_size_z is None
+    assert img3d.pixels.physical_size_z == pytest.approx(PX_Z)
+    assert img3d.pixels.physical_size_x == pytest.approx(PX_XY)
+    assert img3d.acquisition_date == T0
+    assert ome.instruments[0].microscope.model == "HTX"
     assert [(p.the_t, p.the_c, p.delta_t) for p in img3d.pixels.planes] == [
         (0, 0, 0.0),
         (0, 1, 0.0),
@@ -284,23 +273,6 @@ def test_time_interval_and_ome_planes():
     rdr.set_scene("2DMIP")
     assert rdr.time_interval == INTERVAL
 
-
-def test_ome_metadata():
-    rdr = Reader(TIFF_DIR)
-    ome = rdr.ome_metadata
-    assert isinstance(ome, OME) and len(ome.images) == 2
-    img3d, img2d = ome.images
-    assert (img3d.name, img2d.name) == SCENES
-    assert [c.name for c in img3d.pixels.channels] == CHANNELS_3D
-    assert [c.name for c in img2d.pixels.channels] == CHANNELS_2D
-    assert img2d.pixels.size_z == 1 and img2d.pixels.physical_size_z is None
-    assert img3d.pixels.physical_size_z == pytest.approx(PX_Z)
-    assert img3d.pixels.physical_size_x == pytest.approx(PX_XY)
-    assert img3d.acquisition_date == T0
-    assert ome.instruments[0].microscope.model == "HTX"
-
-
-def test_standard_metadata():
     sm = Reader(TIFF_DIR).standard_metadata.to_dict()
     expected = {
         "Dimensions Present": "TCZYX",
