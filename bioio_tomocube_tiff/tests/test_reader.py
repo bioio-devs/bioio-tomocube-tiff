@@ -10,7 +10,7 @@ from bioio import BioImage
 from bioio_base import exceptions, test_utilities
 from ome_types.model import OME
 
-from bioio_tomocube_tiff import Reader
+from bioio_tomocube_tiff import Reader, ReaderMetadata
 from bioio_tomocube_tiff.tomocube_file import RI_SCALE, TomocubeFile
 
 from .conftest import LOCAL_RESOURCES_DIR
@@ -78,7 +78,7 @@ def _summary(path):
 def test_parse_filename(tmp_path, name, expected):
     """Only the modality token of the name is read; the rest comes from tags."""
     shutil.copyfile(HT_TP01, tmp_path / name)
-    assert _summary(tmp_path / name) == (expected, {(T0,)})
+    assert _summary(tmp_path) == (expected, {(T0,)})
 
 
 @pytest.mark.parametrize(
@@ -86,14 +86,23 @@ def test_parse_filename(tmp_path, name, expected):
 )
 def test_parse_filename_rejects(tmp_path, name):
     shutil.copyfile(HT_TP01, tmp_path / name)
-    with pytest.raises(exceptions.UnsupportedFileFormatError, match="modality token"):
-        Reader(tmp_path / name)
+    with pytest.raises(exceptions.UnsupportedFileFormatError, match="No Tomocube"):
+        Reader(tmp_path)
 
 
-@pytest.mark.parametrize("anchor", [HT_TP01, FL3D_CH1_TP05, FL2D_CH0_TP05, TIFF_DIR])
-def test_discover_full_series(anchor):
-    """Any file, even one inside a TP folder, or the directory finds every file."""
-    assert _summary(anchor) == (SERIES, {(T0, T1)})
+def test_discover_full_series():
+    assert _summary(TIFF_DIR) == (SERIES, {(T0, T1)})
+
+
+@pytest.mark.parametrize("path", [HT_TP01, FL3D_CH1_TP05])
+def test_single_file_rejected(path):
+    with pytest.raises(exceptions.UnsupportedFileFormatError, match="Not a directory"):
+        Reader(path)
+
+
+def test_reader_metadata():
+    assert ReaderMetadata.get_supported_extensions() == []
+    assert ReaderMetadata.supports_directory_images()
 
 
 # ---------------------------------------------------------------------------
@@ -105,10 +114,6 @@ def test_discover_full_series(anchor):
     "filename, set_scene, expected_shape, expected_channel_names, "
     "expected_physical_pixel_sizes",
     [
-        (HT_TP01, "3D", SHAPE_3D, CHANNELS_3D, (PX_Z, PX_XY, PX_XY)),
-        (FL3D_CH1_TP05, "3D", SHAPE_3D, CHANNELS_3D, (PX_Z, PX_XY, PX_XY)),
-        (FL2D_CH0_TP05, "2DMIP", SHAPE_2D, CHANNELS_2D, (None, PX_XY, PX_XY)),
-        (HT_TP05, "2DMIP", SHAPE_2D, CHANNELS_2D, (None, PX_XY, PX_XY)),
         (TIFF_DIR, "3D", SHAPE_3D, CHANNELS_3D, (PX_Z, PX_XY, PX_XY)),
         (TIFF_DIR, "2DMIP", SHAPE_2D, CHANNELS_2D, (None, PX_XY, PX_XY)),
     ],
@@ -139,7 +144,7 @@ def test_reader(
 def test_multi_scene():
     test_utilities.run_multi_scene_image_read_checks(
         ImageContainer=Reader,
-        image=HT_TP05,
+        image=TIFF_DIR,
         first_scene_id="3D",
         first_scene_shape=SHAPE_3D,
         first_scene_dtype=np.dtype(np.float32),
@@ -151,26 +156,13 @@ def test_multi_scene():
     )
 
 
-@pytest.mark.parametrize(
-    "filename, expected_scene",
-    [
-        (HT_TP01, "3D"),
-        (FL3D_CH1_TP05, "3D"),
-        (FL2D_CH0_TP05, "2DMIP"),
-        (TIFF_DIR, "3D"),
-    ],
-)
-def test_default_scene_matches_anchor_file(filename, expected_scene):
-    assert Reader(filename).current_scene == expected_scene
-
-
 def test_unsupported(tmp_path):
     with pytest.raises(exceptions.UnsupportedFileFormatError):
         Reader(LOCAL_RESOURCES_DIR / "unsupported.tif")
     # a matching name without HTX tags
     tifffile.imwrite(tmp_path / "x.TP01_HT3D_0.00.TIFF", np.zeros((4, 4), np.uint16))
     with pytest.raises(exceptions.UnsupportedFileFormatError, match="Model/Software"):
-        Reader(tmp_path / "x.TP01_HT3D_0.00.TIFF")
+        Reader(tmp_path)
     # a directory without export files
     (tmp_path / "empty").mkdir()
     with pytest.raises(exceptions.UnsupportedFileFormatError, match="No Tomocube"):
@@ -187,7 +179,7 @@ def test_mismatched_grids_rejected(tmp_path):
         extratags=[(272, "s", 0, "HTX", True)],
     )
     with pytest.raises(exceptions.UnsupportedFileFormatError, match="pixel grid"):
-        Reader(tmp_path / HT_TP01.name)
+        Reader(tmp_path)
 
 
 # ---------------------------------------------------------------------------
@@ -227,21 +219,21 @@ def test_projection_scene_is_padded_to_full_t_axis():
 def test_fl3d_reads_all_pages_not_imagej_slices():
     with tifffile.TiffFile(FL3D_CH0_TP01) as tif:
         assert tif.imagej_metadata["slices"] == 12 and len(tif.pages) == 70
-    fl0 = Reader(FL3D_CH0_TP01).data[0, 1]
+    fl0 = Reader(TIFF_DIR).data[0, 1]
     assert fl0.shape == (70, 32, 32)
     nonzero = [z for z in range(70) if fl0[z].any()]
     assert nonzero[0] == 30 and nonzero[-1] == 43 and len(nonzero) == 14
 
 
 def test_z_spacing_comes_from_ht_header():
-    rdr = Reader(FL3D_CH0_TP01)
+    rdr = Reader(TIFF_DIR)
     assert rdr.physical_pixel_sizes.Z == pytest.approx(PX_Z)
 
 
 def test_ht_is_refractive_index():
     raw = _pages(HT_TP01)
     assert raw.dtype == np.uint16
-    rdr = Reader(HT_TP01)
+    rdr = Reader(TIFF_DIR)
     data = rdr.data
     assert rdr.dtype == data.dtype == np.float32
     np.testing.assert_allclose(data[0, 0], raw.astype(np.float32) * RI_SCALE)
@@ -250,7 +242,7 @@ def test_ht_is_refractive_index():
 
 
 def test_dask_chunks_one_plane_each():
-    lazy = Reader(HT_TP01).xarray_dask_data
+    lazy = Reader(TIFF_DIR).xarray_dask_data
     assert isinstance(lazy.data, da.Array) and lazy.dims == ("T", "C", "Z", "Y", "X")
     assert lazy.data.chunks[:3] == ((1, 1), (1, 1, 1), (1,) * 70)
     assert lazy[1, 2, 35].compute().shape == (32, 32)
@@ -259,7 +251,7 @@ def test_dask_chunks_one_plane_each():
 def test_incomplete_timepoint_is_padded(tmp_path, caplog):
     _copy_fixtures(tmp_path, skip={FL3D_CH1_TP05.name})
     with caplog.at_level("WARNING", logger="bioio_tomocube_tiff.reader"):
-        rdr = Reader(tmp_path / HT_TP01.name)
+        rdr = Reader(tmp_path)
     assert rdr.shape == SHAPE_3D
     data = rdr.data
     assert not data[1, 2].any()
@@ -275,7 +267,7 @@ def test_incomplete_timepoint_is_padded(tmp_path, caplog):
 
 
 def test_time_interval_and_ome_planes():
-    rdr = Reader(HT_TP01)
+    rdr = Reader(TIFF_DIR)
     assert rdr.time_interval == INTERVAL
     img3d, img2d = rdr.ome_metadata.images
     assert [(p.the_t, p.the_c, p.delta_t) for p in img3d.pixels.planes] == [
@@ -294,7 +286,7 @@ def test_time_interval_and_ome_planes():
 
 
 def test_ome_metadata():
-    rdr = Reader(HT_TP05)
+    rdr = Reader(TIFF_DIR)
     ome = rdr.ome_metadata
     assert isinstance(ome, OME) and len(ome.images) == 2
     img3d, img2d = ome.images
@@ -309,7 +301,7 @@ def test_ome_metadata():
 
 
 def test_standard_metadata():
-    sm = Reader(FL3D_CH0_TP01).standard_metadata.to_dict()
+    sm = Reader(TIFF_DIR).standard_metadata.to_dict()
     expected = {
         "Dimensions Present": "TCZYX",
         "Image Size T": 2,
@@ -333,23 +325,15 @@ def test_standard_metadata():
 
 
 def test_bioimage():
-    img = BioImage(HT_TP01)
+    img = BioImage(TIFF_DIR, reader=Reader)
     assert isinstance(img.reader, Reader)
     assert img.shape == SHAPE_3D and img.channel_names == CHANNELS_3D
+    assert img.dtype == np.float32
     np.testing.assert_array_equal(
         img.get_image_data("ZYX", T=1, C=1), _pages(FL3D_CH0_TP05)
     )
-    img = BioImage(HT_TP01)
-    assert img.dtype == np.float32
-
-
-def test_bioimage_directory_needs_explicit_reader():
-    img = BioImage(TIFF_DIR, reader=Reader)
-    assert img.shape == SHAPE_3D
     img.set_scene("2DMIP")
     assert img.shape == SHAPE_2D
-    with pytest.raises(exceptions.UnsupportedFileFormatError):
-        BioImage(TIFF_DIR)
 
 
 @pytest.fixture(scope="module")
@@ -364,9 +348,8 @@ def mem_fs():
     mem.rm("/tomocube", recursive=True)
 
 
-@pytest.mark.parametrize("relative", ["", f"/{HT_TP05.name}"])
-def test_remote_read(mem_fs, relative):
-    rdr = Reader(mem_fs + relative)
+def test_remote_read(mem_fs):
+    rdr = Reader(mem_fs)
     assert rdr.scenes == SCENES and rdr.shape == SHAPE_3D
     assert rdr.physical_pixel_sizes.Z == pytest.approx(PX_Z)
     frame = rdr.xarray_dask_data[1, 2, 40].compute()

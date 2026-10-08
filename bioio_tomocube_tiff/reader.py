@@ -51,8 +51,7 @@ class Reader(reader.Reader):
     Parameters
     ----------
     image : types.PathLike
-        The export directory or any TIFF inside it. BioIO detects readers by
-        extension, so a directory needs ``BioImage(path, reader=Reader)``.
+        The export directory.
     fs_kwargs : Dict[str, Any]
         Passed to fsspec when constructing the filesystem.
 
@@ -85,7 +84,7 @@ class Reader(reader.Reader):
         self._is_supported_image(self._fs, self._path)
         self._file = TomocubeFile(self._fs, self._path)
         self._scenes = tuple(self._file.scenes)
-        self._current_scene_index = self._scenes.index(self._file.default_scene)
+        self._current_scene_index = 0
 
     @property
     def scenes(self) -> Tuple[str, ...]:

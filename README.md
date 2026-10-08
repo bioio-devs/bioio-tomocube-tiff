@@ -39,8 +39,8 @@ data/
 ```
 
 The directory is the image. Files that share a `DateTime` tag form one timepoint
-and the distinct tags, in order, are `T`. Pass either the directory or any file
-inside it. The modalities become the channels of one scene:
+and the distinct tags, in order, are `T`. Pass the directory; a single TIFF inside
+it is not supported. The modalities become the channels of one scene:
 
 | Scene | Dims | Channels |
 |---|---|---|

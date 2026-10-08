@@ -1,5 +1,3 @@
-"""An HTX export on disk, opened as scenes of ``[T][C]`` TIFF grids."""
-
 import logging
 import posixpath
 import re
@@ -48,11 +46,7 @@ class _Tiff(NamedTuple):
 
     @classmethod
     def open(cls, fs: AbstractFileSystem, path: str) -> "_Tiff":
-        """Parse the file name and read the first page's tags.
-
-        Pages are counted rather than taken from the ImageJ header, which
-        reports the pre-resampling slice count for FL3D files.
-        """
+        """Parse the file name and read the first page's tags."""
         match = MODALITY_RE.search(posixpath.basename(path))
         if match is None:
             raise exceptions.UnsupportedFileFormatError(
@@ -108,8 +102,8 @@ class TomocubeScene(NamedTuple):
 
     name: str
     channels: Tuple[str, ...]
-    datetimes: Tuple[Optional[datetime], ...]  # one per T
-    files: Tuple[Tuple[Optional[_Tiff], ...], ...]  # [t][c]; None = missing
+    datetimes: Tuple[Optional[datetime], ...]
+    files: Tuple[Tuple[Optional[_Tiff], ...], ...]
 
     @property
     def channel_files(self) -> Tuple[_Tiff, ...]:
@@ -160,11 +154,7 @@ class TomocubeScene(NamedTuple):
 
 
 def _build_scenes(files: Sequence[_Tiff]) -> Dict[str, TomocubeScene]:
-    """Group TIFFs into scenes sharing one ``T`` axis and one pixel grid.
-
-    Every file of one timepoint carries the same ``DateTime`` tag, so the
-    distinct tags, in order, are the ``T`` axis.
-    """
+    """Group TIFFs into scenes sharing one ``T`` axis and one pixel grid."""
     datetimes = tuple(
         sorted(
             {f.datetime for f in files}, key=lambda d: (d is None, d or datetime.min)
@@ -214,14 +204,12 @@ class TomocubeFile:
     Parameters
     ----------
     fs, path:
-        The export directory or any export TIFF.
+        The export directory.
 
     Attributes
     ----------
     scenes:
         ``"3D"`` and, when projections were exported, ``"2DMIP"``.
-    default_scene:
-        The scene holding the file that was opened; ``"3D"`` for a directory.
     """
 
     def __init__(
@@ -230,36 +218,17 @@ class TomocubeFile:
         path: str,
     ):
         files = [_Tiff.open(fs, p) for p in self.discover(fs, path)]
-        anchor = None
-        if not fs.isdir(path):
-            name = posixpath.basename(path)
-            anchor = next(f for f in files if posixpath.basename(f.path) == name)
         self.scenes: Dict[str, TomocubeScene] = _build_scenes(files)
-        self.default_scene: str = anchor.scene if anchor else next(iter(self.scenes))
 
     @staticmethod
     def discover(fs: AbstractFileSystem, path: str) -> List[str]:
-        """Paths of every export TIFF of the acquisition *path* belongs to.
+        """Paths of every export TIFF in the export directory *path*."""
+        if not fs.isdir(path):
+            raise exceptions.UnsupportedFileFormatError(
+                "bioio-tomocube-tiff", path, "Not a directory."
+            )
 
-        The fluorescence files of a timepoint sit in a ``<name>`` folder
-        beside the ``<name>_HT3D_...`` volume, so a file named after its
-        folder is scanned from one level up.
-        """
-        if fs.isdir(path):
-            root = path
-        else:
-            if MODALITY_RE.search(posixpath.basename(path)) is None:
-                raise exceptions.UnsupportedFileFormatError(
-                    "bioio-tomocube-tiff",
-                    path,
-                    "File name has no Tomocube modality token "
-                    "(_HT3D_, _FL3D_CHn_, ...).",
-                )
-            root = posixpath.dirname(path)
-            if posixpath.basename(path).startswith(posixpath.basename(root) + "_"):
-                root = posixpath.dirname(root)
-
-        entries = fs.ls(root, detail=True)
+        entries = fs.ls(path, detail=True)
         names = [e["name"] for e in entries if e["type"] != "directory"]
         for e in entries:
             if e["type"] == "directory":
@@ -269,6 +238,6 @@ class TomocubeFile:
             raise exceptions.UnsupportedFileFormatError(
                 "bioio-tomocube-tiff",
                 path,
-                f"No Tomocube export TIFFs found in {root!r}.",
+                f"No Tomocube export TIFFs found in {path!r}.",
             )
         return sorted(paths)
