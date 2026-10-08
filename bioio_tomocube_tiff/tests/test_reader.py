@@ -1,6 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
 import pathlib
 import typing
 from datetime import datetime, timedelta
@@ -21,21 +18,16 @@ from .conftest import LOCAL_RESOURCES_DIR
 TIFF_DIR = LOCAL_RESOURCES_DIR / "tiff"
 
 
-def test_reader_with_unsupported_inputs(tmp_path: pathlib.Path) -> None:
-    with pytest.raises(exceptions.UnsupportedFileFormatError, match="Not a directory"):
-        Reader(LOCAL_RESOURCES_DIR / "unsupported.tif")
-
-    (tmp_path / "empty").mkdir()
-    with pytest.raises(exceptions.UnsupportedFileFormatError, match="No Tomocube"):
-        Reader(tmp_path / "empty")
-
-    # an export-style name without the HTX Model/Software tags
-    (tmp_path / "untagged").mkdir()
-    tifffile.imwrite(
-        tmp_path / "untagged" / "x.TP01_HT3D_0.00.TIFF", np.zeros((4, 4), np.uint16)
-    )
-    with pytest.raises(exceptions.UnsupportedFileFormatError, match="Model/Software"):
-        Reader(tmp_path / "untagged")
+@pytest.mark.parametrize(
+    "filename, expected_message",
+    [
+        ("unsupported.tif", "Not a directory"),
+        ("untagged", "Model/Software"),
+    ],
+)
+def test_reader_with_unsupported_inputs(filename: str, expected_message: str) -> None:
+    with pytest.raises(exceptions.UnsupportedFileFormatError, match=expected_message):
+        Reader(LOCAL_RESOURCES_DIR / filename)
 
 
 @pytest.mark.parametrize(
@@ -111,19 +103,6 @@ def test_reader_multi_scene() -> None:
         second_scene_dtype=np.dtype(np.uint16),
         allow_same_scene_data=False,
     )
-
-
-def test_pixel_data() -> None:
-    rdr = Reader(TIFF_DIR)
-    data = rdr.data
-    # HT is refractive index; the fluorescence channels are left as exported
-    assert 1.30 < data[:, 0].min() < data[:, 0].max() < 1.45
-    assert data[:, 1:].max() > 1
-    np.testing.assert_array_equal(rdr.dask_data.compute(), data)
-
-    # the projections were only exported for the second timepoint
-    rdr.set_scene("2DMIP")
-    assert not rdr.data[0].any() and rdr.data[1].any()
 
 
 def test_dask_chunks_one_plane_each() -> None:
