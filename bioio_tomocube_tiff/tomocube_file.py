@@ -8,6 +8,8 @@ import numpy as np
 import tifffile
 from bioio_base import exceptions, types
 from fsspec.spec import AbstractFileSystem
+from ome_types.units import ureg
+from pint import DimensionalityError, UndefinedUnitError
 
 ###############################################################################
 
@@ -22,11 +24,17 @@ MODALITY_RE = re.compile(
     r".*\.tiff?$",
     re.IGNORECASE,
 )
-_RESUNIT_TO_UM = {2: 25_400.0, 3: 10_000.0}
-_IMAGEJ_UNIT_TO_UM = {"cm": 1e4, "mm": 1e3, "um": 1.0, "µm": 1.0, "micron": 1.0}
 _TAGS_TO_SKIP = {"StripOffsets", "StripByteCounts"}
 
 ###############################################################################
+
+
+def _micrometers_per(unit: str) -> Optional[float]:
+    """Micrometers in one *unit*, or None if the unit is unknown or not a length."""
+    try:
+        return float((1 * ureg(unit)).to("um").magnitude)
+    except (UndefinedUnitError, DimensionalityError):
+        return None
 
 
 class _Tiff(NamedTuple):
@@ -59,10 +67,10 @@ class _Tiff(NamedTuple):
             n_pages = len(tif.pages)
             shape, dtype = page.shape, page.dtype
             res_x, res_y = page.resolution
-            unit = _RESUNIT_TO_UM.get(int(page.resolutionunit))
+            unit = _micrometers_per(page.resolutionunit.name.lower())
             tags = {t.name: t.value for t in page.tags if t.name not in _TAGS_TO_SKIP}
             imagej = dict(tif.imagej_metadata or {})
-        z_unit = _IMAGEJ_UNIT_TO_UM.get(str(imagej.get("unit", "um")).lower())
+        z_unit = _micrometers_per(str(imagej.get("unit", "um")))
         channel = match.group("channel")
         return cls(
             path=path,
