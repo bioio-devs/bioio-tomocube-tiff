@@ -54,9 +54,6 @@ class Reader(reader.Reader):
         The export directory.
     fs_kwargs : Dict[str, Any]
         Passed to fsspec when constructing the filesystem.
-
-    ``HT`` is returned as refractive index (stored x 10 000), so scenes that
-    include it are float32.
     """
 
     @staticmethod
