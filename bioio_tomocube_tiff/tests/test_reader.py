@@ -127,7 +127,7 @@ def test_reader(
         expected_scenes=SCENES,
         expected_current_scene=set_scene,
         expected_shape=expected_shape,
-        expected_dtype=np.dtype(np.uint16),
+        expected_dtype=np.dtype(np.float32 if set_scene == "3D" else np.uint16),
         expected_dims_order="TCZYX",
         expected_channel_names=expected_channel_names,
         expected_physical_pixel_sizes=expected_physical_pixel_sizes,
@@ -142,7 +142,7 @@ def test_multi_scene():
         image=HT_TP05,
         first_scene_id="3D",
         first_scene_shape=SHAPE_3D,
-        first_scene_dtype=np.dtype(np.uint16),
+        first_scene_dtype=np.dtype(np.float32),
         second_scene_id="2DMIP",
         second_scene_shape=SHAPE_2D,
         second_scene_dtype=np.dtype(np.uint16),
@@ -162,17 +162,6 @@ def test_multi_scene():
 )
 def test_default_scene_matches_anchor_file(filename, expected_scene):
     assert Reader(filename).current_scene == expected_scene
-
-
-def test_single_timepoint_option():
-    rdr = Reader(HT_TP01, timelapse=False)
-    assert rdr.scenes == ("3D",)  # TP01 has no projections
-    assert rdr.shape == (1, 3, 70, 32, 32)
-    assert rdr.time_interval is None
-
-    rdr = Reader(FL2D_CH0_TP05, timelapse=False)
-    assert rdr.current_scene == "2DMIP"
-    assert rdr.shape == (1, 2, 1, 32, 32)
 
 
 def test_unsupported(tmp_path):
@@ -218,7 +207,10 @@ def test_channels_and_timepoints_come_from_the_right_files():
         (1, 1, FL3D_CH0_TP05),
         (1, 2, FL3D_CH1_TP05),
     ]:
-        np.testing.assert_array_equal(data[t, c], _pages(path))
+        expected = _pages(path)
+        if c == 0:
+            expected = expected.astype(np.float32) * RI_SCALE
+        np.testing.assert_array_equal(data[t, c], expected)
     np.testing.assert_array_equal(rdr.dask_data.compute(), data)
 
 
@@ -246,20 +238,15 @@ def test_z_spacing_comes_from_ht_header():
     assert rdr.physical_pixel_sizes.Z == pytest.approx(PX_Z)
 
 
-def test_refractive_index_option():
-    raw = Reader(HT_TP01).data
-    assert (
-        raw.dtype == np.uint16 and 12_000 < raw[:, 0].min() < raw[:, 0].max() < 16_000
-    )
-    rdr = Reader(HT_TP01, refractive_index=True)
+def test_ht_is_refractive_index():
+    raw = _pages(HT_TP01)
+    assert raw.dtype == np.uint16
+    rdr = Reader(HT_TP01)
     data = rdr.data
     assert rdr.dtype == data.dtype == np.float32
-    np.testing.assert_allclose(data[:, 0], raw[:, 0].astype(np.float32) * RI_SCALE)
-    np.testing.assert_array_equal(data[:, 1:], raw[:, 1:])
+    np.testing.assert_allclose(data[0, 0], raw.astype(np.float32) * RI_SCALE)
     assert 1.30 < data[:, 0].min() < data[:, 0].max() < 1.45
     assert rdr.ome_metadata.images[0].pixels.type.value == "float"
-    # a scene without HT is untouched
-    assert Reader(FL2D_CH0_TP05, refractive_index=True).dtype == np.uint16
 
 
 def test_dask_chunks_one_plane_each():
@@ -352,8 +339,8 @@ def test_bioimage():
     np.testing.assert_array_equal(
         img.get_image_data("ZYX", T=1, C=1), _pages(FL3D_CH0_TP05)
     )
-    img = BioImage(HT_TP01, timelapse=False, refractive_index=True)
-    assert img.shape == (1, 3, 70, 32, 32) and img.dtype == np.float32
+    img = BioImage(HT_TP01)
+    assert img.dtype == np.float32
 
 
 def test_bioimage_directory_needs_explicit_reader():

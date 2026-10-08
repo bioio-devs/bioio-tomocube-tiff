@@ -55,11 +55,9 @@ class Reader(reader.Reader):
         extension, so a directory needs ``BioImage(path, reader=Reader)``.
     fs_kwargs : Dict[str, Any]
         Passed to fsspec when constructing the filesystem.
-    timelapse : bool
-        Stack every timepoint along ``T`` (default). ``False`` keeps only the
-        given file's timepoint; ignored for a directory.
-    refractive_index : bool
-        Return ``HT`` as refractive index (raw x 1e-4) and the scene as float32.
+
+    ``HT`` is returned as refractive index (stored x 10 000), so scenes that
+    include it are float32.
     """
 
     @staticmethod
@@ -80,14 +78,12 @@ class Reader(reader.Reader):
         self,
         image: types.PathLike,
         fs_kwargs: Dict[str, Any] = {},
-        timelapse: bool = True,
-        refractive_index: bool = False,
     ):
         self._fs, self._path = io.pathlike_to_fs(
             image, enforce_exists=True, fs_kwargs=fs_kwargs
         )
         self._is_supported_image(self._fs, self._path)
-        self._file = TomocubeFile(self._fs, self._path, timelapse, refractive_index)
+        self._file = TomocubeFile(self._fs, self._path)
         self._scenes = tuple(self._file.scenes)
         self._current_scene_index = self._scenes.index(self._file.default_scene)
 

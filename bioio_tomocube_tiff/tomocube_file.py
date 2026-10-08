@@ -110,7 +110,6 @@ class TomocubeScene(NamedTuple):
     channels: Tuple[str, ...]
     datetimes: Tuple[Optional[datetime], ...]  # one per T
     files: Tuple[Tuple[Optional[_Tiff], ...], ...]  # [t][c]; None = missing
-    refractive_index: bool
 
     @property
     def channel_files(self) -> Tuple[_Tiff, ...]:
@@ -135,12 +134,12 @@ class TomocubeScene(NamedTuple):
 
     @property
     def dtype(self) -> np.dtype:
-        if self.refractive_index and "HT" in self.channels:
+        if "HT" in self.channels:
             return np.dtype(np.float32)
         return self.channel_files[0].dtype
 
     def scale(self, channel: str) -> Optional[float]:
-        return RI_SCALE if self.refractive_index and channel == "HT" else None
+        return RI_SCALE if channel == "HT" else None
 
     @property
     def pixel_sizes(self) -> types.PhysicalPixelSizes:
@@ -160,9 +159,7 @@ class TomocubeScene(NamedTuple):
         return (last - first) / (len(self.datetimes) - 1)
 
 
-def _build_scenes(
-    files: Sequence[_Tiff], refractive_index: bool
-) -> Dict[str, TomocubeScene]:
+def _build_scenes(files: Sequence[_Tiff]) -> Dict[str, TomocubeScene]:
     """Group TIFFs into scenes sharing one ``T`` axis and one pixel grid.
 
     Every file of one timepoint carries the same ``DateTime`` tag, so the
@@ -196,7 +193,6 @@ def _build_scenes(
             files=tuple(
                 tuple(lookup.get((dt, c)) for c in channels) for dt in datetimes
             ),
-            refractive_index=refractive_index,
         )
         if scene.missing:
             log.warning(
@@ -219,11 +215,6 @@ class TomocubeFile:
     ----------
     fs, path:
         The export directory or any export TIFF.
-    timelapse:
-        Keep every timepoint (default). ``False`` keeps only the timepoint of
-        the given file; ignored for a directory.
-    refractive_index:
-        Scale the ``HT`` channel to refractive index and return float32.
 
     Attributes
     ----------
@@ -237,17 +228,13 @@ class TomocubeFile:
         self,
         fs: AbstractFileSystem,
         path: str,
-        timelapse: bool = True,
-        refractive_index: bool = False,
     ):
         files = [_Tiff.open(fs, p) for p in self.discover(fs, path)]
         anchor = None
         if not fs.isdir(path):
             name = posixpath.basename(path)
             anchor = next(f for f in files if posixpath.basename(f.path) == name)
-            if not timelapse:
-                files = [f for f in files if f.datetime == anchor.datetime]
-        self.scenes: Dict[str, TomocubeScene] = _build_scenes(files, refractive_index)
+        self.scenes: Dict[str, TomocubeScene] = _build_scenes(files)
         self.default_scene: str = anchor.scene if anchor else next(iter(self.scenes))
 
     @staticmethod
