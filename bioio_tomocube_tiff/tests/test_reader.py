@@ -1,5 +1,6 @@
 import pathlib
 import typing
+from datetime import datetime, timedelta
 
 import dask.array as da
 import fsspec
@@ -8,6 +9,7 @@ import pytest
 import tifffile
 from bioio import BioImage
 from bioio_base import dimensions, exceptions, test_utilities
+from ome_types.model import OME
 
 from bioio_tomocube_tiff import Reader
 
@@ -85,7 +87,7 @@ def test_reader(
         expected_dims_order=expected_dims_order,
         expected_channel_names=expected_channel_names,
         expected_physical_pixel_sizes=expected_physical_pixel_sizes,
-        expected_metadata_type=dict,
+        expected_metadata_type=OME,
     )
 
 
@@ -109,6 +111,34 @@ def test_dask_chunks_one_plane_each() -> None:
     assert lazy.data.chunks[:3] == ((1, 1), (1, 1, 1), (1,) * 70)
 
 
+def test_metadata() -> None:
+    rdr = Reader(TIFF_DIR)
+    interval = timedelta(seconds=354)
+    assert rdr.time_interval == interval
+
+    ome = rdr.ome_metadata
+    img3d, img2d = ome.images
+    assert [i.name for i in ome.images] == ["3D", "2DMIP"]
+    assert img3d.acquisition_date == datetime(2025, 10, 3, 12, 36, 59)
+    assert ome.instruments[0].microscope.model == "HTX"
+    assert img3d.pixels.type.value == "float"
+    assert [(p.the_t, p.the_c, p.delta_t) for p in img3d.pixels.planes] == [
+        (0, 0, 0.0),
+        (0, 1, 0.0),
+        (0, 2, 0.0),
+        (1, 0, 354.0),
+        (1, 1, 354.0),
+        (1, 2, 354.0),
+    ]
+    # the projections share the T axis; the timepoint without them has no planes
+    assert [(p.the_t, p.the_c) for p in img2d.pixels.planes] == [(1, 0), (1, 1)]
+    assert img2d.pixels.size_t == 2 and img2d.pixels.time_increment == 354.0
+
+    sm = rdr.standard_metadata.to_dict()
+    assert sm["Timelapse"] and sm["Timelapse Interval"] == interval
+    assert sm["Imaging Datetime"] == datetime(2025, 10, 3, 12, 36, 59)
+
+
 def test_incomplete_timepoint_is_padded(
     export_dir: pathlib.Path, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -118,6 +148,8 @@ def test_incomplete_timepoint_is_padded(
     data = rdr.data
     assert data.shape == (2, 3, 70, 32, 32)
     assert not data[1, 2].any() and data[0, 2].any()
+    planes = rdr.ome_metadata.images[0].pixels.planes
+    assert len(planes) == 5 and (1, 2) not in {(p.the_t, p.the_c) for p in planes}
     assert any("(T, C) planes [(1, 2)]" in r.message for r in caplog.records)
 
 

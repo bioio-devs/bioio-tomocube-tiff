@@ -1,3 +1,4 @@
+from datetime import timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 import dask
@@ -8,7 +9,9 @@ import xarray as xr
 from bioio_base import constants, exceptions, io, reader, types
 from bioio_base.dimensions import DimensionNames
 from fsspec.spec import AbstractFileSystem
+from ome_types.model import OME
 
+from .ome import build_ome
 from .tomocube_file import TomocubeFile, TomocubeScene
 
 ###############################################################################
@@ -155,7 +158,7 @@ class Reader(reader.Reader):
                 DimensionNames.SpatialX,
             ],
             coords={DimensionNames.Channel: list(self._scene.channels)},
-            attrs={constants.METADATA_PROCESSED: self._scene.channel_files[0].tags},
+            attrs={constants.METADATA_PROCESSED: self.ome_metadata},
         )
 
     @property
@@ -169,3 +172,11 @@ class Reader(reader.Reader):
     @property
     def physical_pixel_sizes(self) -> types.PhysicalPixelSizes:
         return self._scene.pixel_sizes
+
+    @property
+    def time_interval(self) -> Optional[timedelta]:
+        return self._scene.time_interval
+
+    @property
+    def ome_metadata(self) -> OME:
+        return build_ome(self._file)
