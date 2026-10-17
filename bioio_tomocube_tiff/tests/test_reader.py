@@ -8,7 +8,9 @@ import numpy as np
 import pytest
 import tifffile
 from bioio import BioImage
-from bioio_base import dimensions, exceptions, test_utilities
+from bioio_base import dimensions, exceptions, io
+from bioio_base import reader as base_reader
+from bioio_base import test_utilities
 from ome_types.model import OME
 
 from bioio_tomocube_tiff import Reader
@@ -196,3 +198,58 @@ def test_remote_read(mem_fs: str) -> None:
     assert rdr.scenes == ("3D", "2DMIP")
     assert rdr.shape == (2, 3, 70, 32, 32)
     assert rdr.xarray_dask_data[1, 2, 40].compute().shape == (32, 32)
+
+
+@pytest.mark.parametrize(
+    "url, expected_uri",
+    [
+        (
+            "https://s3.us-west-2.amazonaws.com/my-bucket/tomocube",
+            "s3://my-bucket/tomocube",
+        ),
+        (
+            "https://my-bucket.s3.us-west-2.amazonaws.com/tomocube",
+            "s3://my-bucket/tomocube",
+        ),
+    ],
+)
+def test_s3_https_url_is_read_as_anonymous_s3(
+    mem_fs: str, monkeypatch: pytest.MonkeyPatch, url: str, expected_uri: str
+) -> None:
+    # Arrange
+    calls: typing.List[typing.Tuple[typing.Any, typing.Dict[str, typing.Any]]] = []
+    pathlike_to_fs = io.pathlike_to_fs
+
+    def fake_pathlike_to_fs(
+        uri: typing.Any, enforce_exists: bool, fs_kwargs: typing.Dict[str, typing.Any]
+    ) -> typing.Any:
+        calls.append((uri, fs_kwargs))
+        return pathlike_to_fs(mem_fs, enforce_exists, {})
+
+    monkeypatch.setattr(io, "pathlike_to_fs", fake_pathlike_to_fs)
+    monkeypatch.setattr(base_reader, "pathlike_to_fs", fake_pathlike_to_fs)
+
+    # Act
+    supported = Reader.is_supported_image(url)
+    Reader(url)
+
+    # Assert
+    assert supported
+    assert calls == [(expected_uri, {"anon": True})] * 2
+
+
+@pytest.mark.parametrize("method", [Reader, Reader.is_supported_image])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://example.org/tomocube",  # not S3, nothing to list with
+        "http://example.org/tomocube/",  # plain http is not S3 either
+        "https://example.org/tomocube/run.TP01_HT3D_0.00.TIFF",  # no sibling files
+        "https://s3.example.org/my-bucket/tomocube",  # s3. host but not AWS
+    ],
+)
+def test_unlistable_http_url_raises_specific_error(
+    method: typing.Any, url: str
+) -> None:
+    with pytest.raises(exceptions.UnsupportedFileFormatError, match="can't be listed"):
+        method(url)
