@@ -8,9 +8,8 @@ import numpy as np
 import pytest
 import tifffile
 from bioio import BioImage
-from bioio_base import dimensions, exceptions, io
+from bioio_base import dimensions, exceptions, io, test_utilities
 from bioio_base import reader as base_reader
-from bioio_base import test_utilities
 from ome_types.model import OME
 
 from bioio_tomocube_tiff import Reader
