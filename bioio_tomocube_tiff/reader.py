@@ -1,5 +1,6 @@
 from datetime import timedelta
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlparse
 
 import dask
 import dask.array as da
@@ -26,6 +27,20 @@ def _read_pages(
     if scale is not None:
         data = data * np.float32(scale)
     return data.astype(dtype, copy=False)
+
+
+def _to_listable_url(
+    image: Any, fs_kwargs: Dict[str, Any]
+) -> Tuple[Any, Dict[str, Any]]:
+    image, fs_kwargs = io.s3_https_to_s3(image, fs_kwargs)
+    if isinstance(image, str) and urlparse(image).scheme in ("http", "https"):
+        raise exceptions.UnsupportedFileFormatError(
+            "bioio-tomocube-tiff",
+            image,
+            "A directory can't be listed over HTTP(S). Use an S3 URL.",
+        )
+
+    return image, fs_kwargs
 
 
 ###############################################################################
@@ -56,6 +71,13 @@ class Reader(reader.Reader):
         Passed to fsspec when constructing the filesystem.
     """
 
+    @classmethod
+    def is_supported_image(
+        cls, image: types.ImageLike, fs_kwargs: Dict[str, Any] = {}, **kwargs: Any
+    ) -> bool:
+        image, fs_kwargs = _to_listable_url(image, fs_kwargs)
+        return super().is_supported_image(image, fs_kwargs, **kwargs)
+
     @staticmethod
     def _is_supported_image(fs: AbstractFileSystem, path: str, **kwargs: Any) -> bool:
         paths = TomocubeFile.discover(fs, path)
@@ -75,6 +97,7 @@ class Reader(reader.Reader):
         image: types.PathLike,
         fs_kwargs: Dict[str, Any] = {},
     ):
+        image, fs_kwargs = _to_listable_url(image, fs_kwargs)
         self._fs, self._path = io.pathlike_to_fs(
             image, enforce_exists=True, fs_kwargs=fs_kwargs
         )
