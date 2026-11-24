@@ -2,7 +2,7 @@
 
 [![Build Status](https://github.com/bioio-devs/bioio-tomocube-tiff/actions/workflows/ci.yml/badge.svg)](https://github.com/bioio-devs/bioio-tomocube-tiff/actions)
 [![License](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
-[![Python 3.10–3.13](https://img.shields.io/badge/python-3.10--3.13-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11–3.15](https://img.shields.io/badge/python-3.11--3.15-blue.svg)](https://www.python.org/downloads/)
 
 A BioIO reader plugin for the multi-file TIFF export of the Tomocube HTX
 ProcessingServer. The instrument's native `.TCF` files are read by
